@@ -66,3 +66,18 @@ getPeriodInfo <- function(periodName = 'Jun_17') {
   dfDateRange
 }
 
+#' getNumHours
+#'
+#' @param periodName e.g. 'Jun_17'
+#' @param onOrOff  e.g. 'OFF'
+#'
+#' @return
+#' @export
+#'
+#' @examples
+getNumHours <- function(periodName = 'Jun_17', onOrOff = 'OFF') {
+  periodInfo <- getPeriodInfo(periodName)
+  cal <- getRtoCalendar('SPP', periodInfo[['FromDate']], periodInfo[['ToDate']], props = c('TIMEOFUSE'))
+  numHours <- sum(cal$TIMEOFUSE == onOrOff)
+}
+

@@ -89,7 +89,7 @@ getDfSppDaCongestOnPaths <- function(lstPaths, dateRange, ftpRoot = FTPROOT_DAPR
     }
   }
 
-  dfPaths
+  dplyr::select( dfPaths, Source, Sink, GMTIntervalEnd, SourceMCC, SinkMCC, CONGEST, CONGEST_PROXY )
 }
 
 ..getDaPriceFileNameByDate <- function(dateObj) {

@@ -27,8 +27,7 @@ STANDARD_CAL_PROPERTIES <- c('START_DT', 'START_DT.GMT', 'DATE', 'HOURENDING', '
 #' @param props a character vector that lists the requested properties
 #'
 #' @examples
-#' cal <- teatime::getRtoCalendar('SPP', '2017-01-01','2017-04-01', props=c('DATE.YEARMONTH', 'START_DT', 'START_DT.GMT', 'TIMEOFUSE'))
-#' reshape2::dcast(cal, DATE.YEARMONTH + TIMEOFUSE ~ ., length)
+#' cal <- getRtoCalendar('SPP', '2017-01-01','2017-04-01', props=c('DATE.YEARMONTH', 'START_DT', 'START_DT.GMT', 'TIMEOFUSE'))
 #'
 #' @export
 getRtoCalendar <- function(marketName, fromDate, toDate = NULL, props = STANDARD_CAL_PROPERTIES, byMinutes = NULL) {

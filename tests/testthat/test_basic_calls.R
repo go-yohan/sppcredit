@@ -44,7 +44,11 @@ testthat::test_that('getting day-ahead price using local drive on a specific day
 testthat::test_that('getting the lmp distribution works', {
   dateRange <- lubridate::as_date(c('2016-07-01', '2016-07-03'))
   dfCongest <- getDfSppDaCongestOnPaths(lstPaths = TestListPaths, dateRange, ftpRoot = LocalDriveDaPrice)
-  dfCongest <- getDfDaCongestDistribution(lstPaths = TestListPaths, dateRange, ftpRoot = LocalDriveDaPrice, periodName = 'Jun_17', onOrOff = 'OFF', yearOffset = 1)
+  # expect 48 hour data for each path
+  testthat::expect_equal(nrow(dfCongest), 48 * length(TestListPaths))
+
+  dfCongest <- getDfDaCongestDistribution(lstPaths = TestListPaths, ftpRoot = LocalDriveDaPrice, periodName = 'Jun_17', onOrOff = 'OFF', yearOffset = 1)
+  testthat::expect_equal(nrow(dfCongest), length(TestListPaths))
 
 })
 

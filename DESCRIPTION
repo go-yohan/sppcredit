@@ -14,4 +14,10 @@ RoxygenNote: 6.0.1
 Imports:
     dplyr,
     tidyr,
-    lubridate
+    lubridate,
+    purrr,
+    stringr,
+    readr,
+    timeDate,
+    tibble,
+    R6

@@ -49,27 +49,58 @@ showRefPriceCalcMatchesRefPrice <- function(lstPaths = TestListPaths, periodName
   list(cmp = dfCmp, gg = gg)
 }
 
+
+cmpRefPriceToIdealCalculationOnWorstValue <- function(lstPaths = TestListPaths, periodName = 'Jun_17', onOrOff = 'OFF') {
+  dfRefPrice <- getDfRefPriceByPeriod(periodName = periodName, onOrOff = onOrOff, ftpRoot = LocalDriveRefPrice, lstPaths = lstPaths)
+
+  # calculate the number of hours once
+  numHours <- getNumHours(periodName = periodName, onOrOff = onOrOff)
+
+  # set the dateRange to historical data one year ago
+  dfWorst <- calcIdealWorstCaseValueByPath(lstPaths, periodName, onOrOff, ftpRoot = ftpRoot, numHours = numHours)
+
+  dfCmp <- dfRefPrice  %>% select(Source, Sink, HOURLY_REFERENCE_PRICE) %>%
+    left_join(dfWorst %>% select(Source, Sink, Period5PctPerMwh)) %>%
+    tidyr::unite(Path, Source, Sink, sep = ' -- ')
+
+  gg <- ggplot2::ggplot(dfCmp)  + geom_point(aes(x = Period5PctPerMwh, y = HOURLY_REFERENCE_PRICE), alpha = (0.5)) +
+    geom_abline(intercept = 0, slope = 1, alpha = I(0.5), color = I("red"))
+
+  list(cmp = dfCmp, gg = gg)
+}
+
+# COMPARING published reference price to the calculated reference price
 lstPathsAnnual <- getListPathsFromAnnualResults()
 lstCmp <- showRefPriceCalcMatchesRefPrice(lstPaths = lstPathsAnnual)
 lstCmp[['gg']]
 dfCmp <- lstCmp[['cmp']]
 dfCmp[order(dfCmp[['HOURLY_REFERENCE_PRICE']]), ] %>% head()
 dfCmp[order(-dfCmp[['HOURLY_REFERENCE_PRICE']]), ] %>% head()
+ggsave(filename = 'Compare_Calc_Vs_RefPrice.png', plot = lstCmp[['gg']], width = 6, height= 6, units = "in")
 
-# 4 paths that are almost exactly 0
-dfRefPriceAll <- getDfRefPriceByPeriod(periodName = periodName, onOrOff = onOrOff, ftpRoot = LocalDriveRefPrice, lstPaths = NULL)
 
-# Look at the reference price on all paths and see
-indAroundZeroNewPaths <- (!is.na(dfRefPriceAll[['HOURLY_REFERENCE_PRICE']]) &
-                            dfRefPriceAll[['YEAR_1_PROXY_PRICE_IND']] == 'Y' &
-                            dfRefPriceAll[['YEAR_2_PROXY_PRICE_IND']] == 'Y' &
-                            dfRefPriceAll[['HOURLY_REFERENCE_PRICE']] <= 1e-4 &
-                            dfRefPriceAll[['HOURLY_REFERENCE_PRICE']] >= -1e-4)
-print.data.frame(unique(dfRefPriceAll[indAroundZeroNewPaths, c('Source')]))
+# COMPARING to an ideal worst-case value
+lstCmpToWorst <- cmpRefPriceToIdealCalculationOnWorstValue(lstPaths = lstPathsAnnual)
+lstCmpToWorst[['gg']]
+dfCmpToWorst <- lstCmpToWorst[['cmp']]
 
-ind <- indAroundZeroNewPaths & dfRefPriceAll[['Source']] == "SECI.FPLP.GRAYWIND"
-print.data.frame(dfRefPriceAll[ind, ])
+dfCmpToWorst[order(dfCmpToWorst[['HOURLY_REFERENCE_PRICE']]),]
+ggsave(filename = 'Compare_Statistical_Worstcase_Vs_RefPrice.png', plot = lstCmpToWorst[['gg']], width = 6, height= 6, units = "in")
 
+# # 4 paths that are almost exactly 0
+# dfRefPriceAll <- getDfRefPriceByPeriod(periodName = periodName, onOrOff = onOrOff, ftpRoot = LocalDriveRefPrice, lstPaths = NULL)
+#
+# # Look at the reference price on all paths and see
+# indAroundZeroNewPaths <- (!is.na(dfRefPriceAll[['HOURLY_REFERENCE_PRICE']]) &
+#                             dfRefPriceAll[['YEAR_1_PROXY_PRICE_IND']] == 'Y' &
+#                             dfRefPriceAll[['YEAR_2_PROXY_PRICE_IND']] == 'Y' &
+#                             dfRefPriceAll[['HOURLY_REFERENCE_PRICE']] <= 1e-4 &
+#                             dfRefPriceAll[['HOURLY_REFERENCE_PRICE']] >= -1e-4)
+# print.data.frame(unique(dfRefPriceAll[indAroundZeroNewPaths, c('Source')]))
+#
+# ind <- indAroundZeroNewPaths & dfRefPriceAll[['Source']] == "SECI.FPLP.GRAYWIND"
+# print.data.frame(dfRefPriceAll[ind, ])
+#
 # pick the what seems to be a long path
 lstPathsInterest <- list(
   list(Source = "OKGECENTWIND", Sink = "OKGESNRWIND"),
@@ -79,7 +110,7 @@ lstPathsInterest <- list(
   list(Source = "INDN_MWE_SMKY2", Sink = "CSWMAJESTICWIND")
   )
 
-dateRange <- lubridate::as_date(c('2016-06-01', '2016-07-01'))
+dateRange <- lubridate::as_date(c('2017-01-01', '2017-05-01'))
 onOrOff <- "OFF"
 dfCongest <- getDfSppDaCongestOnPaths(lstPaths = lstPathsInterest, dateRange = dateRange, ftpRoot = LocalDriveDaPrice, toOverrideNaWithMarketWideAverageMcc = FALSE)
 dfCongest <- dfCongest %>% left_join(getRtoCalendar("SPP", fromDate = as.character(dateRange[1]), toDate = as.character(dateRange[2]),
@@ -90,10 +121,13 @@ ind <- dfCongest[['Class']] == onOrOff
 dfCongest <- dfCongest[ind, ]
 
 vecQuantiles <- c(0.05, 0.10, 0.25, 0.50)
-quantile(unlist(dfCongest %>% filter(Source == "OKGECENTWIND", Sink == "OKGESNRWIND") %>% select(CONGEST)), probs = vecQuantiles)
-gg <- dfCongest %>% filter(Source == "OKGECENTWIND", Sink == "OKGESNRWIND") %>% ggplot()
-gg + geom_histogram(aes(x = CONGEST))
-
-quantile(unlist(dfCongest %>% filter(Source == "OKGESNRWIND", Sink == "WR.MW.GMEC.MW") %>% select(CONGEST)), probs = vecQuantiles)
-gg <- dfCongest %>% filter(Source == "OKGESNRWIND", Sink == "WR.MW.GMEC.MW") %>% ggplot()
-gg + geom_histogram(aes(x = CONGEST))
+theSource <-  "SECI.FPLP.GRAYWIND"
+theSink <- "WAUE.BEPM.BRADY1"
+vecCongest <- unlist(dfCongest %>% filter(Source == theSource, Sink == theSink) %>% select(CONGEST))
+c(quantile(vecCongest, probs = vecQuantiles), Mean = mean(vecCongest))
+# gg <- dfCongest %>% filter(Source == "OKGECENTWIND", Sink == "OKGESNRWIND") %>% ggplot()
+# gg + geom_histogram(aes(x = CONGEST))
+#
+# quantile(unlist(dfCongest %>% filter(Source == "OKGESNRWIND", Sink == "WR.MW.GMEC.MW") %>% select(CONGEST)), probs = vecQuantiles)
+# gg <- dfCongest %>% filter(Source == "OKGESNRWIND", Sink == "WR.MW.GMEC.MW") %>% ggplot()
+# gg + geom_histogram(aes(x = CONGEST))

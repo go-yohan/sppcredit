@@ -24,7 +24,6 @@ Recognized properties are:
 START_DT, START_DT.GMT, DATE, DATE.YEARMONTH, END_DT, HOURENDING, TIMEOFUSE, SEASON, PO_INTERVAL, PLANNING_YEAR
 }
 \examples{
-cal <- teatime::getRtoCalendar('SPP', '2017-01-01','2017-04-01', props=c('DATE.YEARMONTH', 'START_DT', 'START_DT.GMT', 'TIMEOFUSE'))
-reshape2::dcast(cal, DATE.YEARMONTH + TIMEOFUSE ~ ., length)
+cal <- getRtoCalendar('SPP', '2017-01-01','2017-04-01', props=c('DATE.YEARMONTH', 'START_DT', 'START_DT.GMT', 'TIMEOFUSE'))
 
 }

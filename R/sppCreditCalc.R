@@ -193,3 +193,37 @@ calcRefPriceSpp <- function(lstPaths, periodName = 'Jun_17', onOrOff = 'OFF', ft
   dfCalc
 }
 
+
+#' calcIdealWorstCaseValueByPath
+#'
+#' @param aPath
+#' @param dateRange
+#' @param ftpRoot
+#'
+#' @return
+#' @export
+#'
+#' @examples
+#' aPath <- list(Source = 'WR.MW.SMOK2.CU', Sink = 'SPRM_SPRM')
+#' dateRange <- c('2016-06-01', '2016-07-01')
+#' calcIdealWorstCaseValueByPath(aPath, dateRange = dateRange)
+#'
+calcIdealWorstCaseValueByPath <- function(lstPaths, periodName = 'Jun_17', onOrOff = 'OFF', ftpRoot = LocalDriveDaPrice, numHours = NULL) {
+  dfStatsYear1 <- getDfDaCongestDistributionYear1(lstPaths = lstPaths, periodName = periodName, onOrOff = onOrOff, ftpRoot = ftpRoot, vecQuantiles = c(0.5))
+
+  hourlyAverage <- dfStatsYear1[['Mean']]
+  hourly5Pct <- dfStatsYear1[['Q0.5']]
+
+  # if numHours is NULL, make it equal to the sample
+  if (is.null(numHours)) {
+    numHours <- getNumHours(periodName = periodName, onOrOff = onOrOff)
+  }
+
+  # calculate the Monthly product accordingly
+  dfStatsYear1[['Period5Pct']] <- numHours * hourlyAverage - sqrt(numHours) * (hourlyAverage - hourly5Pct)
+  dfStatsYear1[['Period5PctPerMwh']] <- dfStatsYear1[['Monthly5Pct']] / numHours
+
+  dfStatsYear1
+}
+
+
