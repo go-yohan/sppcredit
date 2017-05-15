@@ -208,20 +208,25 @@ calcRefPriceSpp <- function(lstPaths, periodName = 'Jun_17', onOrOff = 'OFF', ft
 #' dateRange <- c('2016-06-01', '2016-07-01')
 #' calcIdealWorstCaseValueByPath(aPath, dateRange = dateRange)
 #'
-calcIdealWorstCaseValueByPath <- function(lstPaths, periodName = 'Jun_17', onOrOff = 'OFF', ftpRoot = LocalDriveDaPrice, numHours = NULL) {
-  dfStatsYear1 <- getDfDaCongestDistributionYear1(lstPaths = lstPaths, periodName = periodName, onOrOff = onOrOff, ftpRoot = ftpRoot, vecQuantiles = c(0.5))
+calcIdealWorstCaseValueByPath <- function(lstPaths, periodName = 'Jun_17', onOrOff = 'OFF', ftpRoot = LocalDriveDaPrice, numHours = NULL, vecQuantiles = 0.05) {
+  dfStatsYear1 <- getDfDaCongestDistributionYear1(lstPaths = lstPaths, periodName = periodName, onOrOff = onOrOff, ftpRoot = ftpRoot, vecQuantiles = vecQuantiles)
 
   hourlyAverage <- dfStatsYear1[['Mean']]
-  hourly5Pct <- dfStatsYear1[['Q0.5']]
 
   # if numHours is NULL, make it equal to the sample
   if (is.null(numHours)) {
     numHours <- getNumHours(periodName = periodName, onOrOff = onOrOff)
   }
 
-  # calculate the Monthly product accordingly
-  dfStatsYear1[['Period5Pct']] <- numHours * hourlyAverage - sqrt(numHours) * (hourlyAverage - hourly5Pct)
-  dfStatsYear1[['Period5PctPerMwh']] <- dfStatsYear1[['Monthly5Pct']] / numHours
+  for ( theQuantile in vecQuantiles ) {
+    labelQuantile <- paste0('Q', as.character(theQuantile))
+    hourlyXPct <- dfStatsYear1[[labelQuantile]]
+
+    # calculate the Monthly product accordingly
+    labelPeriodPrice <- paste0('Period', labelQuantile)
+    dfStatsYear1[[labelPeriodPrice]] <- numHours * hourlyAverage - sqrt(numHours) * (hourlyAverage - hourlyXPct)
+    dfStatsYear1[[paste0(labelPeriodPrice, 'PerMwh')]] <- dfStatsYear1[[labelPeriodPrice]] / numHours
+  }
 
   dfStatsYear1
 }

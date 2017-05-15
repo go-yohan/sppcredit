@@ -60,7 +60,7 @@ getPeriodInfo <- function(periodName = 'Jun_17') {
 
   # calculate the planning year
   dfDateRange[['PlanningYear']] <- 2000 + yearOffset
-  ind <- periodName == 'Spring'
+  ind <- period == 'Spring'
   dfDateRange[['PlanningYear']][ind] <- 2000 + yearOffset - 1
 
   dfDateRange

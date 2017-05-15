@@ -57,13 +57,16 @@ cmpRefPriceToIdealCalculationOnWorstValue <- function(lstPaths = TestListPaths, 
   numHours <- getNumHours(periodName = periodName, onOrOff = onOrOff)
 
   # set the dateRange to historical data one year ago
-  dfWorst <- calcIdealWorstCaseValueByPath(lstPaths, periodName, onOrOff, ftpRoot = ftpRoot, numHours = numHours)
+  dfWorst <- calcIdealWorstCaseValueByPath(lstPaths, periodName, onOrOff, ftpRoot = ftpRoot, numHours = numHours, vecQuantiles = c(0.5, 0.05, 0.02))
 
   dfCmp <- dfRefPrice  %>% select(Source, Sink, HOURLY_REFERENCE_PRICE) %>%
-    left_join(dfWorst %>% select(Source, Sink, Period5PctPerMwh)) %>%
+    left_join(dfWorst %>% select(Source, Sink, PeriodQ0.5PerMwh, PeriodQ0.05PerMwh, PeriodQ0.02PerMwh)) %>%
     tidyr::unite(Path, Source, Sink, sep = ' -- ')
 
-  gg <- ggplot2::ggplot(dfCmp)  + geom_point(aes(x = Period5PctPerMwh, y = HOURLY_REFERENCE_PRICE), alpha = (0.5)) +
+  gg <- ggplot2::ggplot(dfCmp)  +
+    geom_point(aes(x = PeriodQ0.5PerMwh, y = HOURLY_REFERENCE_PRICE), alpha = (0.5), colour = I("orange")) +
+    geom_point(aes(x = PeriodQ0.05PerMwh, y = HOURLY_REFERENCE_PRICE), alpha = (0.5), colour = I("blue")) +
+    geom_point(aes(x = PeriodQ0.02PerMwh, y = HOURLY_REFERENCE_PRICE), alpha = (0.5), colour = I("lightgreen")) +
     geom_abline(intercept = 0, slope = 1, alpha = I(0.5), color = I("red"))
 
   list(cmp = dfCmp, gg = gg)
@@ -84,7 +87,7 @@ lstCmpToWorst <- cmpRefPriceToIdealCalculationOnWorstValue(lstPaths = lstPathsAn
 lstCmpToWorst[['gg']]
 dfCmpToWorst <- lstCmpToWorst[['cmp']]
 
-dfCmpToWorst[order(dfCmpToWorst[['HOURLY_REFERENCE_PRICE']]),]
+dfCmpToWorst[order(-dfCmpToWorst[['HOURLY_REFERENCE_PRICE']]),]
 ggsave(filename = 'Compare_Statistical_Worstcase_Vs_RefPrice.png', plot = lstCmpToWorst[['gg']], width = 6, height= 6, units = "in")
 
 # # 4 paths that are almost exactly 0
