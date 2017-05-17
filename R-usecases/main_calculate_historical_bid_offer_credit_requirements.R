@@ -26,6 +26,16 @@ lstByPeriod <- purrr::map(vecPeriods, function(periodName) {
   dfPaths <- unique(dplyr::select(dfBid, Source, Sink))
   lstPaths <- purrr::transpose(dfPaths)
 
+  # calculate actual value
+  periodInfo <- getPeriodInfo(periodName)
+  dateRange <- c(periodInfo[['FromDate']], periodInfo[['ToDate']])
+  if ( periodInfo[['ToDate']] > lubridate::now()) {
+    dateRange[2] <- lubridate::as_date(lubridate::now())
+  }
+  dfActualValue <- getDfSppDaCongestOnPaths(lstPaths = lstPaths, dateRange = dateRange, ftpRoot = LocalDriveDaPrice)
+  cal <- getRtoCalendar("SPP", fromDate = as.character(dateRange[1]), toDate = as.character(dateRange[2]), props = c("GMTIntervalEnd", "TIMEOFUSE"))
+  dfActualValue <- dfActualValue %>% left_join(cal %>% select(GMTIntervalEnd, Class = TIMEOFUSE))
+
 
   # get the reference price for both ON and OFF
   lstOnOrOff <- purrr::map(vecTous, function(onOrOff) {
@@ -40,10 +50,12 @@ lstByPeriod <- purrr::map(vecPeriods, function(periodName) {
     # nrow(dfRefPrice)
     # unique(dfRefPrice$Class)
 
+
     # join the reference price information
     dfBidSpecClass <- dfBid %>% filter(Class == onOrOff) %>%
       left_join(dfRefPrice) %>%
-      left_join(dfStatsWorstCase)
+      left_join(dfStatsWorstCase) %>%
+      left_join(dfActualValue %>% filter(Class == onOrOff) %>% select(Source, Sink, CONGEST) %>% group_by(Source, Sink) %>% summarise(CONGEST = sum(CONGEST)))
 
     # calculate the credit requirements
     lstBidsSpecClass <- purrr::transpose(dfBidSpecClass)
@@ -51,11 +63,17 @@ lstByPeriod <- purrr::map(vecPeriods, function(periodName) {
     lstBidsSpecClass <- purrr::map(1:length(lstBidsSpecClass), function(bidEntryInd) {
       print(bidEntryInd)
       bidEntry <- lstBidsSpecClass[[bidEntryInd]]
+
+      lstPq <- getBidPriceQuantityPair(bidEntry)
+      vecMw <- lstPq[['MW']]
+
       bidEntry[['CREDIT_REQUIRED']] <- calcBidCreditNeeded(bidEntry = bidEntry, bidOffset = bidEntry[['PRODUCT_REFERENCE_PRICE']], netting = TRUE)
 
       # calculate the credit requirement for a percentile
       bidEntry[['CREDIT_REQUIRED_STATS0.02']] <- calcBidCreditNeeded(bidEntry = bidEntry, bidOffset = bidEntry[['PeriodQ0.02']], netting = TRUE)
       bidEntry[['CREDIT_REQUIRED_STATS0.05']] <- calcBidCreditNeeded(bidEntry = bidEntry, bidOffset = bidEntry[['PeriodQ0.05']], netting = TRUE)
+
+      bidEntry[['CREDIT_REQUIRED_ACTUAL']] <- calcBidCreditNeeded(bidEntry = bidEntry, bidOffset = bidEntry[['CONGEST']], netting = TRUE)
 
       bidEntry
     })
@@ -66,7 +84,8 @@ lstByPeriod <- purrr::map(vecPeriods, function(periodName) {
          Proxy2 = sum(dfBidSpecClass[['YEAR_2_PROXY_PRICE_IND']] == 'Y', na.rm = TRUE),
          CreditRequired = purrr::map_dbl(lstBidsSpecClass, function(bidEntry) bidEntry[['CREDIT_REQUIRED']]),
          CreditRequiredStats02 = purrr::map_dbl(lstBidsSpecClass, function(bidEntry) bidEntry[['CREDIT_REQUIRED_STATS0.02']]),
-         CreditRequiredStats05 = purrr::map_dbl(lstBidsSpecClass, function(bidEntry) bidEntry[['CREDIT_REQUIRED_STATS0.05']])
+         CreditRequiredStats05 = purrr::map_dbl(lstBidsSpecClass, function(bidEntry) bidEntry[['CREDIT_REQUIRED_STATS0.05']]),
+         CreditRequiredActual = purrr::map_dbl(lstBidsSpecClass, function(bidEntry) bidEntry[['CREDIT_REQUIRED_ACTUAL']])
     )
   })
 
@@ -75,9 +94,11 @@ lstByPeriod <- purrr::map(vecPeriods, function(periodName) {
 })
 names(lstByPeriod) <- vecPeriods
 
+
+# gather the credit requirements for each period
 lstCreditRequiredByPeriods = list()
-vecLabels <- c('CreditRequired', 'CreditRequiredStats02', 'CreditRequiredStats05')
-vecRefPriceMethods <- c('Current', 'Stats 2%-tile', 'Stats 5%-tile')
+vecLabels <- c('CreditRequired', 'CreditRequiredStats02', 'CreditRequiredStats05', 'CreditRequiredActual')
+vecRefPriceMethods <- c('Current', 'Stats 2%-tile', 'Stats 5%-tile', 'Actual')
 for (labelInd in 1:length(vecLabels)) {
   refPriceMethod <- vecRefPriceMethods[labelInd]
   label <- vecLabels[labelInd]
@@ -96,9 +117,239 @@ for (labelInd in 1:length(vecLabels)) {
   }
 }
 
-dfCreditRequiredByPeriods <- tibble::tibble(purrr::transpose(lstCreditRequiredByPeriods))
+lstT <- purrr::transpose(lstCreditRequiredByPeriods)
+lstT <- purrr::map(lstT, function(theCol) unlist(theCol))
+names(lstT) <- c('RefPriceMethod', 'Period', 'Class', 'CreditRequirements')
+dfCreditRequiredByPeriods <- as.data.frame(lstT) %>% tidyr::unite(PeriodClass, Period, Class)
+dfCreditRequiredByPeriods[['PeriodClass']] <- factor(dfCreditRequiredByPeriods[['PeriodClass']],
+                                                        levels = paste(rep(vecPeriods, each = 2), rep(vecTous, times = 7), sep = "_"))
+dfCreditRequiredByPeriods[['CreditRequirementsInMillion']] <- dfCreditRequiredByPeriods[['CreditRequirements']] /1e6
+
+gg <- ggplot(dfCreditRequiredByPeriods) +
+  geom_col(aes(x = PeriodClass, y = CreditRequirementsInMillion, fill = RefPriceMethod), position = "dodge") +
+  theme_bw() +
+  ylab("Credit Requirements in M$" ) +
+  xlab("Period Class") +
+  ggplot2::scale_fill_manual(values = TEAColors) +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1))
+
+ggsave(filename = 'Compare_Credit_Requirements.png', plot = gg, width = 6, height= 6, units = "in")
 
 
+# While this is a good reference, it is not a fair comparison. I found that the Actual is higher than Credit Required
+# not on the paths that are required to post credit by the original Reference Price calculation
+# rather it is due to a path that was not required to post credit (because of high positive congestion in the past)
+# but then resulted in high negative congestion. e.g. SPPSOUTH_HUB to OKGETALOGAWIND Winter_16 OFF
+tst <- lstByPeriod[['Winter_16']] [['OFF']]
+vecActual <- tst[['CreditRequiredActual']]
+vecCredit <- tst[['CreditRequired']]
+max(vecActual - vecCredit)
+vecDiff <- vecActual - vecCredit
+ind <- which(vecDiff == max(vecDiff))
+bidEntry <- tst[['Bids']][[ind]]
+
+# as such, to be a fair comparison to the original reference price calculation, we need to just look at the paths
+# that are required to post credit by the current methodology
 
 
+lstCreditRequiredByPeriods = list()
+indToEval <- list()
+vecLabels <- c('CreditRequired', 'CreditRequiredStats02', 'CreditRequiredStats05', 'CreditRequiredActual')
+vecRefPriceMethods <- c('Current', 'Stats 2%-tile', 'Stats 5%-tile', 'Actual')
+for (labelInd in 1:length(vecLabels)) {
+  refPriceMethod <- vecRefPriceMethods[labelInd]
+  label <- vecLabels[labelInd]
+
+  for ( periodName in vecPeriods ) {
+
+    if (is.null(indToEval[[periodName]])) {
+      indToEval[[periodName]] <- list()
+    }
+
+    for (classDef in vecTous) {
+      ind <- indToEval[[periodName]][[classDef]]
+      vecCredit <- lstByPeriod[[periodName]][[classDef]][[label]]
+
+      # save the indeces where the vecCredit is positive to be used for later
+      if (is.null(ind)) {
+        ind <- vecCredit > 0
+        indToEval[[periodName]][[classDef]] <- ind
+      }
+
+      lstCreditRequiredByPeriods[[1+length(lstCreditRequiredByPeriods)]] <-
+        list(
+          RefPriceMethod = refPriceMethod,
+          Period = periodName,
+          Class = classDef,
+          CreditRequirements = sum(vecCredit[ind], na.rm = TRUE)
+        )
+    }
+  }
+}
+
+lstT <- purrr::transpose(lstCreditRequiredByPeriods)
+lstT <- purrr::map(lstT, function(theCol) unlist(theCol))
+names(lstT) <- c('RefPriceMethod', 'Period', 'Class', 'CreditRequirements')
+dfCreditRequiredByPeriods <- as.data.frame(lstT) %>% tidyr::unite(PeriodClass, Period, Class)
+dfCreditRequiredByPeriods[['PeriodClass']] <- factor(dfCreditRequiredByPeriods[['PeriodClass']],
+                                                     levels = paste(rep(vecPeriods, each = 2), rep(vecTous, times = 7), sep = "_"))
+dfCreditRequiredByPeriods[['CreditRequirementsInMillion']] <- dfCreditRequiredByPeriods[['CreditRequirements']] /1e6
+
+gg <- ggplot(dfCreditRequiredByPeriods) +
+  geom_col(aes(x = PeriodClass, y = CreditRequirementsInMillion, fill = RefPriceMethod), position = "dodge") +
+  theme_bw() +
+  ylab("Credit Requirements in M$" ) +
+  xlab("Period Class") +
+  ggplot2::scale_fill_manual(values = TEAColors) +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1))
+
+ggsave(filename = 'Compare_Credit_Requirements_FAIR.png', plot = gg, width = 6, height= 6, units = "in")
+
+# here it shows that there are many periods where Actual is actually higher than the proposed 2%-tile and 5%-tile reference price calculation.
+# I think an even more fair comparison is to look at the distribution on the difference across each bid.
+
+periodName <- 'Sep_16'
+classDef <- 'ON'
+
+#  need to calculate how much I am over-collateralizing by # bids (and percentage) and by $ amount (and percentage)
+
+calcOverUnder <- function(periodName, classDef, as_data_frame = TRUE, excludeNewPaths = FALSE) {
+  tst <- lstByPeriod[[periodName]] [[classDef]]
+  ind <- tst[['CreditRequired']] > 0
+
+  vecActual <- tst[['CreditRequiredActual']][ind]
+  vecMethodTypes <- c('CreditRequired', 'CreditRequiredStats05', 'CreditRequiredStats02')
+  lstOverUnder <- purrr::map(vecMethodTypes, function(methodType) {
+    vecCredit <- tst[[methodType]][ind]
+    vecDiffCredit <- vecActual - vecCredit
+
+    indUnderCollat <- vecDiffCredit > 0
+    indOverCollat <- vecDiffCredit < 0
+
+    if ( excludeNewPaths == TRUE ) {
+      vecYear1Proxy <- purrr::map_chr(tst[['Bids']][ind], function(bidEntry) {bidEntry[['YEAR_1_PROXY_PRICE_IND']]})
+      vecYear2Proxy <- purrr::map_chr(tst[['Bids']][ind], function(bidEntry) {bidEntry[['YEAR_2_PROXY_PRICE_IND']]})
+      indNewPaths <- is.na(vecYear1Proxy) | vecYear1Proxy == 'Y'
+
+      indUnderCollat <- indUnderCollat & !indNewPaths
+      indOverCollat <- indOverCollat & !indNewPaths
+    }
+
+    list(
+      MethodType = methodType,
+
+      OverCollatDollar = sum(vecDiffCredit [indOverCollat]),
+      OverCollatBids = sum(indOverCollat),
+      OverCollatBidsPct = sum(indOverCollat) / length(indOverCollat),
+
+      UnderCollatDollar = sum(vecDiffCredit [indUnderCollat]),
+      UnderCollatBids = sum(indUnderCollat),
+      UnderCollatBidsPct = sum(indUnderCollat) / length(indUnderCollat)
+    )
+    })
+  names(lstOverUnder) <- vecMethodTypes
+
+  if ( !as_data_frame ) {
+    return (lstOverUnder)
+  }
+
+  dfData <- do.call(rbind, purrr::map(lstOverUnder, as.data.frame))
+  rownames(dfData) <- NULL
+  dfData
+}
+
+dfOverUnder <- data.frame()
+for (periodName in vecPeriods) {
+  for (classDef in vecTous) {
+    dfOverUnder <- rbind(dfOverUnder,
+                         data.frame(Period = periodName, Class = classDef, calcOverUnder(periodName, classDef)))
+  }
+}
+readr::write_csv(x = dfOverUnder, path = 'df_over_under.csv')
+
+# can we come up with a metric that compares how much over-collateralization is saved for every under-collateralization exposure
+dfOverUnderSumm <- dfOverUnder %>% group_by(MethodType) %>%
+  summarise(
+    OverCollatDollar = sum(OverCollatDollar),
+    UnderCollatDollar = sum(UnderCollatDollar),
+    OverCollatBids = sum(OverCollatBids),
+    UnderCollatBids = sum(UnderCollatBids)
+  )
+readr::write_csv(x = dfOverUnderSumm, path = 'df_over_under_summary.csv')
+
+# graph the dfOverUnder
+gg <- ggplot(dfOverUnder %>% tidyr::unite(PeriodClass, Period, Class)) +
+  geom_col(aes(x = PeriodClass, y = UnderCollatDollar, fill = MethodType), position = "dodge") +
+  geom_col(aes(x = PeriodClass, y = OverCollatDollar, fill = MethodType), position = "dodge") +
+  theme_bw() +
+  ylab("Over or Under in $" ) +
+  xlab("Period Class") +
+  ggplot2::scale_fill_manual(values = TEAColors) +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1),
+        legend.position = "top") +
+  geom_abline(slope = 0, intercept = 0)
+gg
+ggsave(filename = "Compare_over_under_collateralization.png", width = 10, height = 6, units = "in")
+
+gg <- ggplot(dfOverUnder %>% tidyr::unite(PeriodClass, Period, Class)) +
+  geom_col(aes(x = PeriodClass, y = OverCollatBidsPct * 100, fill = MethodType), position = "dodge") +
+  theme_bw() +
+  ylab("Bids/Offers that are Over-Collateralized in Pct" ) +
+  xlab("Period Class") +
+  ggplot2::scale_fill_manual(values = TEAColors) +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1),
+        legend.position = "top") +
+  geom_abline(slope = 0, intercept = 0) +
+  scale_y_continuous(limits = c(0, 100))
+gg
+ggsave(filename = "Compare_over_under_collateralization_in_PctBids.png", width = 10, height = 6, units = "in")
+
+###-----------------------------------------------
+
+# is over under the same if we exclude the paths that do not have enough history, i.e. both year1 and year2 data do not exist
+dfOverUnder <- data.frame()
+for (periodName in vecPeriods) {
+  for (classDef in vecTous) {
+    dfOverUnder <- rbind(dfOverUnder,
+                         data.frame(Period = periodName, Class = classDef, calcOverUnder(periodName, classDef, excludeNewPaths = TRUE)))
+  }
+}
+readr::write_csv(x = dfOverUnder, path = 'df_over_under_nonewpaths.csv')
+
+# can we come up with a metric that compares how much over-collateralization is saved for every under-collateralization exposure
+dfOverUnderSumm <- dfOverUnder %>% group_by(MethodType) %>%
+  summarise(
+    OverCollatDollar = sum(OverCollatDollar),
+    UnderCollatDollar = sum(UnderCollatDollar),
+    OverCollatBids = sum(OverCollatBids),
+    UnderCollatBids = sum(UnderCollatBids)
+  )
+readr::write_csv(x = dfOverUnderSumm, path = 'df_over_under_summary_nonewpaths.csv')
+
+# graph the dfOverUnder
+gg <- ggplot(dfOverUnder %>% tidyr::unite(PeriodClass, Period, Class)) +
+  geom_col(aes(x = PeriodClass, y = UnderCollatDollar, fill = MethodType), position = "dodge") +
+  geom_col(aes(x = PeriodClass, y = OverCollatDollar, fill = MethodType), position = "dodge") +
+  theme_bw() +
+  ylab("Over or Under in $" ) +
+  xlab("Period Class") +
+  ggplot2::scale_fill_manual(values = TEAColors) +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1),
+        legend.position = "top") +
+  geom_abline(slope = 0, intercept = 0)
+gg
+ggsave(filename = "Compare_over_under_collateralization_nonwqpaths.png", width = 10, height = 6, units = "in")
+
+gg <- ggplot(dfOverUnder %>% tidyr::unite(PeriodClass, Period, Class)) +
+  geom_col(aes(x = PeriodClass, y = OverCollatBidsPct * 100, fill = MethodType), position = "dodge") +
+  theme_bw() +
+  ylab("Bids/Offers that are Over-Collateralized in Pct" ) +
+  xlab("Period Class") +
+  ggplot2::scale_fill_manual(values = TEAColors) +
+  theme(axis.text.x = element_text(angle = 30, hjust = 1),
+        legend.position = "top") +
+  geom_abline(slope = 0, intercept = 0) +
+  scale_y_continuous(limits = c(0, 100))
+gg
+ggsave(filename = "Compare_over_under_collateralization_in_PctBids_nonewpaths.png", width = 10, height = 6, units = "in")
 

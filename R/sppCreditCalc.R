@@ -76,49 +76,56 @@ getDfRefPriceByPeriod <- function(periodName = "Jun_17", onOrOff = "OFF", ftpRoo
 #' @export
 #'
 #' @examples
-getDfDaCongestDistribution <- function(lstPaths, periodName = 'Jun_17', onOrOff = 'OFF', yearOffset = 1, ftpRoot = FTPROOT_DAPRICE, vecQuantiles = c(0.10, 0.25, 0.5)) {
+getDfDaCongestDistribution <- function(lstPaths, periodName = 'Jun_17', onOrOff = 'OFF', yearOffset = 1, ftpRoot = FTPROOT_DAPRICE, vecQuantiles = c(0.10, 0.25, 0.5), useProxy = TRUE) {
   periodInfo <- getPeriodInfo(periodName)
   fromDate <- periodInfo[['FromDate']]
   toDate <- periodInfo[['ToDate']]
 
-  # offset the year to 1 year in the past or 2 years in the past
-  lubridate::year(fromDate) <- lubridate::year(fromDate) - yearOffset
-  lubridate::year(toDate) <- lubridate::year(toDate) - yearOffset
+  # support taking a look at more than one yearOffset
+  lstByYearOffset <- purrr::map(yearOffset, function(yr) {
+    # offset the year to 1 year in the past or 2 years in the past
+    lubridate::year(fromDate) <- lubridate::year(fromDate) - yr
+    lubridate::year(toDate) <- lubridate::year(toDate) - yr
 
-  # if the fromDate has not happened yet, then further offset the year by 1
-  while (fromDate > lubridate::now()) {
-    lubridate::year(fromDate) <- lubridate::year(fromDate) - 1
-    lubridate::year(toDate) <- lubridate::year(toDate) - 1
-  }
+    # if the fromDate has not happened yet, then further offset the year by 1
+    while (fromDate > lubridate::now()) {
+      lubridate::year(fromDate) <- lubridate::year(fromDate) - 1
+      lubridate::year(toDate) <- lubridate::year(toDate) - 1
+    }
 
-  # fromDate and toDate are finalized here
-  dateRange <- c(fromDate, toDate)
+    # fromDate and toDate are finalized here
+    dateRange <- c(fromDate, toDate)
 
-  # get the congestion by Source and Sink
-  dfCongest <- getDfSppDaCongestOnPaths(lstPaths = lstPaths, dateRange = dateRange, ftpRoot = ftpRoot)
+    # get the congestion by Source and Sink
+    dfCongest <- getDfSppDaCongestOnPaths(lstPaths = lstPaths, dateRange = dateRange, ftpRoot = ftpRoot)
 
-  # need to get the ON or OFF time of use
-  dfCal <- getRtoCalendar('SPP',
-                          fromDate = as.character(dateRange[1]),
-                          toDate = as.character(dateRange[2]),
-                          props = c(
-                            #'DATE', 'HOURENDING', 'START_DT.GMT', 'END_DT.GMT',
-                            'GMTIntervalEnd', 'TIMEOFUSE'))
+    # need to get the ON or OFF time of use
+    dfCal <- getRtoCalendar('SPP',
+                            fromDate = as.character(dateRange[1]),
+                            toDate = as.character(dateRange[2]),
+                            props = c(
+                              #'DATE', 'HOURENDING', 'START_DT.GMT', 'END_DT.GMT',
+                              'GMTIntervalEnd', 'TIMEOFUSE'))
 
-  dfCal <- dplyr::select(dfCal, GMTIntervalEnd, Class = TIMEOFUSE)
+    dfCal <- dplyr::select(dfCal, GMTIntervalEnd, Class = TIMEOFUSE)
 
-  # carve out the rows that are not relevant
-  dfCongest <- dplyr::left_join(dfCongest, dfCal)
-  ind <- dfCongest[['Class']] == onOrOff
+    # carve out the rows that are not relevant
+    dfCongest <- dplyr::left_join(dfCongest, dfCal)
+    ind <- dfCongest[['Class']] == onOrOff
 
-  if (sum(is.na(ind)) > 0) {
-    stop('cannot continue, there are some where Class is undefined. ')
-  }
-  dfSet <- dfCongest[ind, c('GMTIntervalEnd', 'Source', 'Sink', 'CONGEST', 'CONGEST_PROXY')]
+    if (sum(is.na(ind)) > 0) {
+      stop('cannot continue, there are some where Class is undefined. ')
+    }
+    dfSet <- dfCongest[ind, c('GMTIntervalEnd', 'Source', 'Sink', 'CONGEST', 'CONGEST_PROXY')]
+  })
+  dfSet <- do.call(rbind, lstByYearOffset)
+
 
   # replace CONGEST with CONGEST_PROXY if it is NA
-  indNA <- is.na(dfSet[['CONGEST']])
-  dfSet[['CONGEST']][indNA] <- dfSet[['CONGEST_PROXY']][indNA]
+  if ( useProxy ) {
+    indNA <- is.na(dfSet[['CONGEST']])
+    dfSet[['CONGEST']][indNA] <- dfSet[['CONGEST_PROXY']][indNA]
+  }
 
   # spread the congestion so each Path is per column
   dfSet <- dplyr::select(dfSet, GMTIntervalEnd, Source, Sink, CONGEST)
@@ -209,9 +216,10 @@ calcRefPriceSpp <- function(lstPaths, periodName = 'Jun_17', onOrOff = 'OFF', ft
 #' calcIdealWorstCaseValueByPath(aPath, dateRange = dateRange)
 #'
 calcIdealWorstCaseValueByPath <- function(lstPaths, periodName = 'Jun_17', onOrOff = 'OFF', ftpRoot = LocalDriveDaPrice, numHours = NULL, vecQuantiles = 0.05) {
-  dfStatsYear1 <- getDfDaCongestDistributionYear1(lstPaths = lstPaths, periodName = periodName, onOrOff = onOrOff, ftpRoot = ftpRoot, vecQuantiles = vecQuantiles)
+  dfStatsYear12 <- getDfDaCongestDistribution(lstPaths, periodName = periodName, onOrOff = onOrOff, yearOffset = c(1,2), ftpRoot = ftpRoot, vecQuantiles = vecQuantiles)
 
-  hourlyAverage <- dfStatsYear1[['Mean']]
+
+  hourlyAverage <- dfStatsYear12[['Mean']]
 
   # if numHours is NULL, make it equal to the sample
   if (is.null(numHours)) {
@@ -220,15 +228,15 @@ calcIdealWorstCaseValueByPath <- function(lstPaths, periodName = 'Jun_17', onOrO
 
   for ( theQuantile in vecQuantiles ) {
     labelQuantile <- paste0('Q', as.character(theQuantile))
-    hourlyXPct <- dfStatsYear1[[labelQuantile]]
+    hourlyXPct <- dfStatsYear12[[labelQuantile]]
 
     # calculate the Monthly product accordingly
     labelPeriodPrice <- paste0('Period', labelQuantile)
-    dfStatsYear1[[labelPeriodPrice]] <- numHours * hourlyAverage - sqrt(numHours) * (hourlyAverage - hourlyXPct)
-    dfStatsYear1[[paste0(labelPeriodPrice, 'PerMwh')]] <- dfStatsYear1[[labelPeriodPrice]] / numHours
+    dfStatsYear12[[labelPeriodPrice]] <- numHours * hourlyAverage - sqrt(numHours) * (hourlyAverage - hourlyXPct)
+    dfStatsYear12[[paste0(labelPeriodPrice, 'PerMwh')]] <- dfStatsYear12[[labelPeriodPrice]] / numHours
   }
 
-  dfStatsYear1
+  dfStatsYear12
 }
 
 
