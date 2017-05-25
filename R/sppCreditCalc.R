@@ -78,11 +78,12 @@ getDfRefPriceByPeriod <- function(periodName = "Jun_17", onOrOff = "OFF", ftpRoo
 #' @examples
 getDfDaCongestDistribution <- function(lstPaths, periodName = 'Jun_17', onOrOff = 'OFF', yearOffset = 1, ftpRoot = FTPROOT_DAPRICE, vecQuantiles = c(0.10, 0.25, 0.5), useProxy = TRUE) {
   periodInfo <- getPeriodInfo(periodName)
-  fromDate <- periodInfo[['FromDate']]
-  toDate <- periodInfo[['ToDate']]
 
   # support taking a look at more than one yearOffset
   lstByYearOffset <- purrr::map(yearOffset, function(yr) {
+    fromDate <- periodInfo[['FromDate']]
+    toDate <- periodInfo[['ToDate']]
+
     # offset the year to 1 year in the past or 2 years in the past
     lubridate::year(fromDate) <- lubridate::year(fromDate) - yr
     lubridate::year(toDate) <- lubridate::year(toDate) - yr

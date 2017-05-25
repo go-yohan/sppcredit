@@ -26,6 +26,7 @@ getDfDaPriceSpp <- function(dateRange, ftpRoot = FTPROOT_DAPRICE) {
   # non-inclusive on the last one
   vecDates <- vecDates[1:(length(vecDates) - 1)]
 
+  cal <- new.env()
   lstPrices <- purrr::map(vecDates, function(dateObj) {
     dateStr <- as.character(dateObj)
     dfDaPrice <- CacheDaPriceByDate[[dateStr]]
@@ -34,6 +35,24 @@ getDfDaPriceSpp <- function(dateRange, ftpRoot = FTPROOT_DAPRICE) {
     if (is.null(dfDaPrice)) {
       dfDaPrice <- ..getDfDaPriceSppOnDate(dateObj, ftpRoot = ftpRoot)
       CacheDaPriceByDate[[dateStr]] <- dfDaPrice
+    }
+
+    # make sure we return a uniform data frame for any date:
+    # GMTIntervalEnd, Settlement Location, Pnode, LMP, MLC, MCC, MEC
+    if ( !is.null(dfDaPrice) ) {
+      # for prices that are 8/22/2014 or older, it only has Interval, and not GMTIntervalEnd
+      # check if that is the case, then remove the Interval
+      if ( is.null(dfDaPrice[['GMTIntervalEnd']]) ) {
+        if ( is.null (cal[['cal']]) ) {
+          cal[['cal']] <- getRtoCalendar('SPP', fromDate = as.character(dateRange[1]), toDate = as.character(dateRange[2]),
+                                         props = c('SPP.Interval', 'GMTIntervalEnd'))
+          cal[['cal']] <- dplyr::select(cal[['cal']], Interval = SPP.Interval, GMTIntervalEnd)
+        }
+
+        dfDaPrice <- dplyr::left_join(dfDaPrice, cal[['cal']])
+      }
+
+      dfDaPrice <- dplyr::select(dfDaPrice, GMTIntervalEnd, `Settlement Location`, Pnode, LMP, MLC, MCC, MEC)
     }
 
     dfDaPrice
@@ -96,7 +115,7 @@ getDfSppDaCongestOnPaths <- function(lstPaths, dateRange, ftpRoot = FTPROOT_DAPR
   paste0('DA-LMP-SL-', strftime(dateObj, '%Y%m%d0100'), '.csv')
 }
 
-..getDfDaPriceSppOnDate <- function(dateObj, ftpRoot = FTPROOT_DAPRICE) {
+..getDfDaPriceSppOnDate <- function(dateObj, ftpRoot = FTPROOT_DAPRICE, returnNullIfNoData = TRUE) {
   # there is a breakpoint of 7/21/2016 where any dates after that follows the new file name with /By_Day subdirectory
   # e.g. ftp://pubftp.spp.org/Markets/DA/LMP_By_SETTLEMENT_LOC/2017/05/By_Day/DA-LMP-SL-201705040100.csv
   # e.g. ftp://pubftp.spp.org/Markets/DA/LMP_By_SETTLEMENT_LOC/2016/07/DA-LMP-SL-201607210100.csv
@@ -127,6 +146,10 @@ getDfSppDaCongestOnPaths <- function(lstPaths, dateRange, ftpRoot = FTPROOT_DAPR
 
     if ( !file.exists(fullFilePath) ) {
       message('the file does not exists: ', fullFilePath)
+      if ( returnNullIfNoData ) {
+        return (NULL)
+      }
+
       stop('cannot find the proper da price for the day: ', as.character(dateObj))
     }
   }

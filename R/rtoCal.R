@@ -125,6 +125,9 @@ RtoCalendar <-
                   # if GMTIntervalEnd is needed
                   if ('GMTIntervalEnd' %in% props) private$calcGmtIntervalEnd()
 
+                  # if SPP.Interval is needed
+                  if ('SPP.Interval' %in% props) private$calcSppInterval()
+
 
                   # check if all requested properties are included
                   ind <- props %in% names(private$..lstCal)
@@ -302,8 +305,11 @@ RtoCalendar <-
 
                 calcGmtIntervalEnd = function() {
                   private$..lstCal[['GMTIntervalEnd']] <- strftime(private$..lstCal[['END_DT.GMT']], '%m/%d/%Y %H:00:00', tz = 'UTC')
-                }
+                },
 
+                calcSppInterval = function() {
+                  private$..lstCal[['SPP.Interval']] <- strftime(private$..lstCal[['END_DT']], '%m/%d/%Y %H:00:00', tz = private$..tz)
+                }
 
               ),
               active = list(

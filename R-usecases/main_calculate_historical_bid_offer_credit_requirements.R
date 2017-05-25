@@ -6,6 +6,12 @@ LocalDriveDaPrice <- "//fs2/world/Analytics/Apps/Qlikview/FTR/SPP_DATA/Markets/D
 
 # look at the annual bid curve and calculate the credit requirements
 
+levelPeriodClass <- function(dfData, vecPeriods, vecTous = c("OFF", "ON"), colPeriodClassName = 'PeriodClass') {
+  dfData[[colPeriodClassName]] <- factor(dfData[[colPeriodClassName]],
+                                    levels = paste(rep(vecPeriods, each = 2), rep(vecTous, times = 7), sep = "_"))
+
+}
+
 #example:
 LocalRootDirHistoricalBid <- "//fs2/world/Analytics/Apps/Qlikview/FTR/SPP_TCR_Annual_Auctions"
 
@@ -15,6 +21,7 @@ vecTous <- c("OFF", "ON")
 # vecPeriods <- c('Jun_16')
 # vecTous <- c('OFF')
 lstByPeriod <- purrr::map(vecPeriods, function(periodName) {
+  message("Evaluating Period: ", periodName)
   fileName <- getHistoricalBidFileName(periodName)
   if (is.null(fileName)) {
     stop("cannot understand the periodName: ", periodName)
@@ -40,9 +47,10 @@ lstByPeriod <- purrr::map(vecPeriods, function(periodName) {
   # get the reference price for both ON and OFF
   lstOnOrOff <- purrr::map(vecTous, function(onOrOff) {
     print(onOrOff)
+    numHours <- sum(cal[['TIMEOFUSE']] == onOrOff)
 
     # calculate the ideal worst case value
-    dfStatsWorstCase <- calcIdealWorstCaseValueByPath(lstPaths = lstPaths, periodName = periodName, onOrOff = onOrOff, ftpRoot = LocalDriveDaPrice, numHours = NULL,
+    dfStatsWorstCase <- calcIdealWorstCaseValueByPath(lstPaths = lstPaths, periodName = periodName, onOrOff = onOrOff, ftpRoot = LocalDriveDaPrice, numHours = numHours,
                                                       vecQuantiles = c(0.5, 0.05, 0.02))
 
     # get the reference price
@@ -121,8 +129,7 @@ lstT <- purrr::transpose(lstCreditRequiredByPeriods)
 lstT <- purrr::map(lstT, function(theCol) unlist(theCol))
 names(lstT) <- c('RefPriceMethod', 'Period', 'Class', 'CreditRequirements')
 dfCreditRequiredByPeriods <- as.data.frame(lstT) %>% tidyr::unite(PeriodClass, Period, Class)
-dfCreditRequiredByPeriods[['PeriodClass']] <- factor(dfCreditRequiredByPeriods[['PeriodClass']],
-                                                        levels = paste(rep(vecPeriods, each = 2), rep(vecTous, times = 7), sep = "_"))
+dfCreditRequiredByPeriods <- levelPeriodClass(dfData = dfCreditRequiredByPeriods, vecPeriods = vecPeriods, vecTous = vecTous, colPeriodClassName = 'PeriodClass')
 dfCreditRequiredByPeriods[['CreditRequirementsInMillion']] <- dfCreditRequiredByPeriods[['CreditRequirements']] /1e6
 
 gg <- ggplot(dfCreditRequiredByPeriods) +
@@ -191,8 +198,7 @@ lstT <- purrr::transpose(lstCreditRequiredByPeriods)
 lstT <- purrr::map(lstT, function(theCol) unlist(theCol))
 names(lstT) <- c('RefPriceMethod', 'Period', 'Class', 'CreditRequirements')
 dfCreditRequiredByPeriods <- as.data.frame(lstT) %>% tidyr::unite(PeriodClass, Period, Class)
-dfCreditRequiredByPeriods[['PeriodClass']] <- factor(dfCreditRequiredByPeriods[['PeriodClass']],
-                                                     levels = paste(rep(vecPeriods, each = 2), rep(vecTous, times = 7), sep = "_"))
+dfCreditRequiredByPeriods <- levelPeriodClass(dfData = dfCreditRequiredByPeriods, vecPeriods = vecPeriods, vecTous = vecTous, colPeriodClassName = 'PeriodClass')
 dfCreditRequiredByPeriods[['CreditRequirementsInMillion']] <- dfCreditRequiredByPeriods[['CreditRequirements']] /1e6
 
 gg <- ggplot(dfCreditRequiredByPeriods) +
@@ -277,8 +283,12 @@ dfOverUnderSumm <- dfOverUnder %>% group_by(MethodType) %>%
   )
 readr::write_csv(x = dfOverUnderSumm, path = 'df_over_under_summary.csv')
 
+dfOverUnder <- dfOverUnder %>% tidyr::unite(PeriodClass, Period, Class)
+dfOverUnder <- levelPeriodClass(dfData = dfOverUnder, vecPeriods = vecPeriods, vecTous = vecTous, colPeriodClassName = 'PeriodClass')
+
+
 # graph the dfOverUnder
-gg <- ggplot(dfOverUnder %>% tidyr::unite(PeriodClass, Period, Class)) +
+gg <- ggplot(dfOverUnder) +
   geom_col(aes(x = PeriodClass, y = UnderCollatDollar, fill = MethodType), position = "dodge") +
   geom_col(aes(x = PeriodClass, y = OverCollatDollar, fill = MethodType), position = "dodge") +
   theme_bw() +
@@ -291,7 +301,7 @@ gg <- ggplot(dfOverUnder %>% tidyr::unite(PeriodClass, Period, Class)) +
 gg
 ggsave(filename = "Compare_over_under_collateralization.png", width = 10, height = 6, units = "in")
 
-gg <- ggplot(dfOverUnder %>% tidyr::unite(PeriodClass, Period, Class)) +
+gg <- ggplot(dfOverUnder) +
   geom_col(aes(x = PeriodClass, y = OverCollatBidsPct * 100, fill = MethodType), position = "dodge") +
   theme_bw() +
   ylab("Bids/Offers that are Over-Collateralized in Pct" ) +
@@ -326,8 +336,11 @@ dfOverUnderSumm <- dfOverUnder %>% group_by(MethodType) %>%
   )
 readr::write_csv(x = dfOverUnderSumm, path = 'df_over_under_summary_nonewpaths.csv')
 
+dfOverUnder <- dfOverUnder %>% tidyr::unite(PeriodClass, Period, Class)
+dfOverUnder <- levelPeriodClass(dfData = dfOverUnder, vecPeriods = vecPeriods, vecTous = vecTous, colPeriodClassName = 'PeriodClass')
+
 # graph the dfOverUnder
-gg <- ggplot(dfOverUnder %>% tidyr::unite(PeriodClass, Period, Class)) +
+gg <- ggplot(dfOverUnder) +
   geom_col(aes(x = PeriodClass, y = UnderCollatDollar, fill = MethodType), position = "dodge") +
   geom_col(aes(x = PeriodClass, y = OverCollatDollar, fill = MethodType), position = "dodge") +
   theme_bw() +
@@ -340,7 +353,7 @@ gg <- ggplot(dfOverUnder %>% tidyr::unite(PeriodClass, Period, Class)) +
 gg
 ggsave(filename = "Compare_over_under_collateralization_nonwqpaths.png", width = 10, height = 6, units = "in")
 
-gg <- ggplot(dfOverUnder %>% tidyr::unite(PeriodClass, Period, Class)) +
+gg <- ggplot(dfOverUnder) +
   geom_col(aes(x = PeriodClass, y = OverCollatBidsPct * 100, fill = MethodType), position = "dodge") +
   theme_bw() +
   ylab("Bids/Offers that are Over-Collateralized in Pct" ) +
