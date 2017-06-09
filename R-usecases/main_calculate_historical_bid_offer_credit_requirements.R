@@ -219,7 +219,7 @@ gg <- ggplot(dfCreditRequiredByPeriods) +
   ggplot2::scale_fill_manual(values = TEAColors) +
   theme(axis.text.x = element_text(angle = 30, hjust = 1))
 
-ggsave(filename = 'Compare_Credit_Requirements_FAIR.png', plot = gg, width = 6, height= 6, units = "in")
+ggsave(filename = 'Compare_Credit_Requirements_FAIR.png', plot = gg, width = 10, height= 6, units = "in")
 
 # here it shows that there are many periods where Actual is actually higher than the proposed 2%-tile and 5%-tile reference price calculation.
 # I think an even more fair comparison is to look at the distribution on the difference across each bid.
@@ -444,6 +444,7 @@ lstOverUnderByPeriod <- purrr::map(vecPeriods, function(periodName) {
 
     list(
       gg = gg,
+      dfToPlotUnderOver = dfToPlotUnderOver,
       UnderUnder = list(AmountDev = amtUnderCollatGreatestDev, Bid = bidEntryUnderUnderGreatestDev),
       OverOver = list(AmountDev = amtOverCollatGreatestDev, Bid = bidEntryOverOverGreatestDev),
       OverOverSmallest = list(AmountDev = amtOverCollatSmallestDev, Bid = bidEntryOverOverSmallestDev),
@@ -465,6 +466,19 @@ tst[['UnderUnder']][['Bid']]
 tst[['OverOver']][['AmountDev']]
 tst[['OverOver']][['Bid']]
 tst[['EqualOver']][['Bid']]
+
+# get the dfToPlotUnderOver and then plot the traversal
+dfToPlotUnderOver[['BidId']] <- 1:nrow(dfToPlotUnderOver)
+dfToPlotTranslation <- tidyr::gather(dfToPlotUnderOver, MethodType, OverUnderCollateralizedDollar, -BidId)
+# ggplot(dfToPlotTranslation %>% filter(MethodType %in% c('CreditRequired', 'CreditRequiredStats05')) %>% dplyr::order_by(dfToPlotTranslation$BidId)) +
+#   geom_line(aes(x = MethodType, y = OverUnderCollateralizedDollar, color = BidId))
+
+sum(dfToPlotUnderOver[['CreditRequiredStats05']] [dfToPlotUnderOver[['CreditRequiredStats05']] > 0])
+sum(dfToPlotUnderOver[['CreditRequiredStats02']] [dfToPlotUnderOver[['CreditRequiredStats02']] > 0])
+sum(dfToPlotUnderOver[['CreditRequired']] [dfToPlotUnderOver[['CreditRequired']] > 0])
+sum(dfToPlotUnderOver[['CreditRequiredStats05']] [dfToPlotUnderOver[['CreditRequiredStats05']] < 0])
+sum(dfToPlotUnderOver[['CreditRequiredStats02']] [dfToPlotUnderOver[['CreditRequiredStats02']] < 0])
+sum(dfToPlotUnderOver[['CreditRequired']] [dfToPlotUnderOver[['CreditRequired']] < 0])
 
 ###-----------------------------------------------
 
