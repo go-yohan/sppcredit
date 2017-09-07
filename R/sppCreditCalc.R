@@ -1,3 +1,5 @@
+CachedRefPrice <- new.env()
+
 #' ..getRefPriceFileNameByPeriod
 #' returns a filename convention that is used by SPP to name their reference price
 #' TCR_REF_PRICES_12-01-2017_04-01-2018_Winter_Off_Peak.csv
@@ -44,8 +46,14 @@ getDfRefPriceByPeriod <- function(periodName = "Jun_17", onOrOff = "OFF", ftpRoo
   fullFilePath <- file.path(ftpRoot, paste0(fileName, '.csv'))
 
   # read the reference price
-  dfRefPrice <- readr::read_delim(fullFilePath, delim = "|")
-  dfRefPrice <- dplyr::select(dfRefPrice, Source = SOURCE_LOCATION, Sink = SINK_LOCATION, Class = TIME_OF_USE, HOURLY_REFERENCE_PRICE, PRODUCT_REFERENCE_PRICE, YEAR_1_PROXY_PRICE_IND, YEAR_2_PROXY_PRICE_IND)
+  if ( ! fullFilePath %in% names(CachedRefPrice) ) {
+    dfRefPrice <- readr::read_delim(fullFilePath, delim = "|")
+    dfRefPrice <- dplyr::select(dfRefPrice, Source = SOURCE_LOCATION, Sink = SINK_LOCATION, Class = TIME_OF_USE, HOURLY_REFERENCE_PRICE, PRODUCT_REFERENCE_PRICE, YEAR_1_PROXY_PRICE_IND, YEAR_2_PROXY_PRICE_IND)
+
+    CachedRefPrice[[fullFilePath]] <- dfRefPrice
+  }
+
+  dfRefPrice <- CachedRefPrice[[fullFilePath]]
 
   # returns all the paths if lstPaths are not specified
   if (is.null(lstPaths)) {
@@ -216,8 +224,8 @@ calcRefPriceSpp <- function(lstPaths, periodName = 'Jun_17', onOrOff = 'OFF', ft
 #' dateRange <- c('2016-06-01', '2016-07-01')
 #' calcIdealWorstCaseValueByPath(aPath, dateRange = dateRange)
 #'
-calcIdealWorstCaseValueByPath <- function(lstPaths, periodName = 'Jun_17', onOrOff = 'OFF', ftpRoot = LocalDriveDaPrice, numHours = NULL, vecQuantiles = 0.05) {
-  dfStatsYear12 <- getDfDaCongestDistribution(lstPaths, periodName = periodName, onOrOff = onOrOff, yearOffset = c(1,2), ftpRoot = ftpRoot, vecQuantiles = vecQuantiles)
+calcIdealWorstCaseValueByPath <- function(lstPaths, periodName = 'Jun_17', onOrOff = 'OFF', ftpRoot = LocalDriveDaPrice, numHours = NULL, vecQuantiles = 0.05, yearOffset = c(1,2)) {
+  dfStatsYear12 <- getDfDaCongestDistribution(lstPaths, periodName = periodName, onOrOff = onOrOff, yearOffset = yearOffset, ftpRoot = ftpRoot, vecQuantiles = vecQuantiles)
 
 
   hourlyAverage <- dfStatsYear12[['Mean']]
@@ -240,4 +248,39 @@ calcIdealWorstCaseValueByPath <- function(lstPaths, periodName = 'Jun_17', onOrO
   dfStatsYear12
 }
 
+#' calcIdealWorstCaseValueByPathSepWeights
+#'
+#' @param lstPaths
+#' @param periodName
+#' @param onOrOff
+#' @param ftpRoot
+#' @param numHours
+#' @param vecQuantiles
+#'
+#' @return
+#' @export
+#'
+#' @examples
+calcIdealWorstCaseValueByPathSepWeights <- function(lstPaths, periodName = 'Jun_17', onOrOff = 'OFF', ftpRoot = LocalDriveDaPrice, numHours = NULL, vecQuantiles = 0.05) {
+  df1 <- calcIdealWorstCaseValueByPath(lstPaths, periodName, onOrOff, ftpRoot = ftpRoot, numHours = numHours, vecQuantiles = vecQuantiles, yearOffset = 1)
+  df2 <- calcIdealWorstCaseValueByPath(lstPaths, periodName, onOrOff, ftpRoot = ftpRoot, numHours = numHours, vecQuantiles = vecQuantiles, yearOffset = 2)
+
+  indSourceSink1 <- names(df1) %in% c('Source', 'Sink')
+  indSourceSink2 <- names(df2) %in% c('Source', 'Sink')
+  # with the exception of Source and Sink, we are going to weight the values in df1 by 75% and df2 by 25%
+
+  # change the colnames to Yr1_...
+  valColNames <- names(df1) [!indSourceSink1]
+  names(df1) [!indSourceSink1] <- paste("Yr1", names(df1) [!indSourceSink1], sep = "_")
+  names(df2) [!indSourceSink2] <- paste("Yr2", names(df2) [!indSourceSink2], sep = "_")
+
+  dfMerged <- dplyr::left_join(df1, df2)
+  for ( colName in valColNames  ) {
+    colName1 <- paste("Yr1", colName, sep = "_")
+    colName2 <- paste("Yr2", colName, sep = "_")
+    dfMerged[[colName]] <- 0.75 * dfMerged[[colName1]] + 0.25 * dfMerged[[colName2]]
+  }
+
+  dfMerged
+}
 
